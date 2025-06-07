@@ -1,0 +1,2 @@
+websockets==11.0.3  # async WebSocket support
+redis==4.5.1        # Redis client

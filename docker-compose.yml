@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:6.2.7              # pinned version for reproducibility
+    ports:
+      - "6379:6379"
+    healthcheck:                   # basic TCP healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  ws-server-blue:
+    build:
+      context: ./ws-server
+    environment:
+      - PLAYER_COLOR=blue          # tag this pod as "blue"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ws-server-green:
+  #   build:
+  #     context: ./ws-server
+  #   environment:
+  #     - PLAYER_COLOR=green         # tag this pod as "green"
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "wget", "--spider", "http://localhost:8000/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+
+  nginx:
+    image: nginx:1.21.6             # pinned version
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    # depends_on:
+    #   ws-server-blue:
+    #     condition: service_healthy
+      # ws-server-green:
+      #   condition: service_healthy
