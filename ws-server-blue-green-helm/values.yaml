@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 2
 
 ws_server_blue_green:
   image:
@@ -10,6 +10,7 @@ ws_server_blue_green:
     targetPort: 8000
     nodePort: 32000
   containerPort: 8000
+  healthCheckPort: 8001
 
 ingress:
   enabled: true
@@ -19,7 +20,7 @@ ingress:
         paths:
           - path: /
             pathType: ImplementationSpecific
-            ws_server_blue_green:
+            backend:
               service:
                 name: ws_server_blue_green
                 port:

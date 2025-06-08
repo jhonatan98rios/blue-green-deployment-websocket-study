@@ -7,13 +7,12 @@ metadata:
     component: ws_server_blue_green
 spec:
   replicas: {{ .Values.replicaCount }}
-  terminationGracePeriodSeconds: 60 # allow time for graceful shutdown
   selector:
     matchLabels:
       app: {{ .Chart.Name }}
       component: ws_server_blue_green
   strategy:
-    type: RollingUpdate
+    # type: RollingUpdate
     rollingUpdate:
       maxSurge: 1       # allow one extra pod during update
       maxUnavailable: 0 # do not take down old pods until new ones are ready
@@ -23,15 +22,30 @@ spec:
         app: {{ .Chart.Name }}
         component: ws_server_blue_green
     spec:
+      terminationGracePeriodSeconds: 30 # allow time for graceful shutdown
       containers:
-        - name: ws-server-blue-green
-          image: "{{ .Values.ws_server_blue_green.image.repository }}:{{ .Values.ws_server_blue_green.image.tag }}"
-          ports:
-            - containerPort: {{ .Values.ws_server_blue_green.containerPort }}
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8001
-            initialDelaySeconds: 2
-            periodSeconds: 5
-            failureThreshold: 1
+      - name: ws-server-blue-green
+        image: "{{ .Values.ws_server_blue_green.image.repository }}:{{ .Values.ws_server_blue_green.image.tag }}"
+        ports:
+        - containerPort: {{ .Values.ws_server_blue_green.containerPort }}
+        - containerPort: {{ .Values.ws_server_blue_green.healthCheckPort }}
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - "curl"
+              - "-XPOST"
+              - "http://localhost:8001/start-draining"
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8001
+          initialDelaySeconds: 2
+          periodSeconds: 5
+          failureThreshold: 1
+        # livenessProbe:
+        #   httpGet:
+        #     path: /health
+        #     port: 8080
+        #   initialDelaySeconds: 10
+        #   periodSeconds: 5

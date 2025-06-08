@@ -35,8 +35,10 @@ async def player_handler(websocket: websockets.WebSocketServerProtocol, path: st
     
     if is_shutting_down:
         await websocket.close(code=1001, reason="Server is shutting down")
+        print("Connection refused: server is shutting down.")
         return
     
+    connected_clients.add(websocket)
     
     sid: str = str(id(websocket))  # Session ID key--OK for PoC
     x, y = 100.0, 100.0            # Starting position for new players
@@ -72,35 +74,82 @@ async def player_handler(websocket: websockets.WebSocketServerProtocol, path: st
         redis_client.hdel('players', sid)
         connected_clients.remove(websocket)
         
-
 async def shutdown(server, runner):
     print("Gracefully shutting down...")
-
+    
+    # First: reject new connections
     server.close()
     await server.wait_closed()
-
-    timeout = 3600  # 1 hour
-
-    async def wait_for_clients():
-        while connected_clients:
-            print(f"Waiting for {len(connected_clients)} clients to disconnect...")
-            await asyncio.sleep(5)
-
-    try:
-        await asyncio.wait_for(wait_for_clients(), timeout=timeout)
-    except asyncio.TimeoutError:
-        print("Forcefully shutting down after timeout.")
-
-    await asyncio.gather(*(client.close() for client in connected_clients))
+    
+    # Second: notify existing clients
+    close_tasks = []
+    for client in connected_clients.copy():  # Use copy to avoid modification during iteration
+        close_tasks.append(
+            client.close(code=1001, reason="Server maintenance in progress")
+        )
+    
+    # Wait for all close operations to complete
+    if close_tasks:
+        await asyncio.wait(close_tasks, timeout=30)
+    
+    # Third: wait for handlers to complete
+    timeout = 300  # 5 minutes max
+    start_time = time.time()
+    
+    while connected_clients:
+        remaining = len(connected_clients)
+        elapsed = time.time() - start_time
+        print(f"Waiting for {remaining} clients (elapsed: {elapsed:.1f}s)")
+        
+        if elapsed > timeout:
+            print("Timeout reached - forcing shutdown")
+            break
+            
+        await asyncio.sleep(5)
+    
+    # Cleanup HTTP server
     if runner:
         await runner.cleanup()
     print("Shutdown complete.")
+    
+# async def shutdown(server, runner):
+#     print("Gracefully shutting down...")
+    
+#     # First: reject new connections
+#     server.close()
+#     await server.wait_closed()
+    
+#     timeout = 3600  # 1 hour
+
+#     async def wait_for_clients():
+#         while connected_clients:
+#             print(f"Waiting for {len(connected_clients)} clients to disconnect...")
+#             await asyncio.sleep(5)
+
+#     try:
+#         await asyncio.wait_for(wait_for_clients(), timeout=timeout)
+#     except asyncio.TimeoutError:
+#         print("Forcefully shutting down after timeout.")
+
+#     # await asyncio.gather(*(client.close() for client in connected_clients))
+#     if runner:
+#         await runner.cleanup()
+#     print("Shutdown complete.")
 
 
 # NEW: health check handler
 async def healthz_handler(request):
+    print("Health check received")
+    global is_shutting_down
     if is_shutting_down:
         return web.Response(status=503, text="Shutting down")
+    return web.Response(status=200, text="OK")
+
+
+async def drain_handler(request):
+    print("Received drain request")
+    global is_shutting_down
+    is_shutting_down = True
     return web.Response(status=200, text="OK")
 
 
@@ -113,9 +162,10 @@ async def main() -> None:
     stop_event = asyncio.Event()
     
     def handle_signal():
+        print("Received termination signal")
         global is_shutting_down
         is_shutting_down = True
-        stop_event.set()
+        # stop_event.set()
         
     # Register signal handlers
     loop.add_signal_handler(signal.SIGINT, handle_signal)
@@ -132,16 +182,25 @@ async def main() -> None:
     # Start HTTP health check server (on same or separate port)
     app = web.Application()
     app.router.add_get("/healthz", healthz_handler)
+    app.router.add_get("/start-draining", drain_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=PORT + 1)  # e.g. 8001
     await site.start()
 
     print(f"WebSocket server ({PLAYER_COLOR}) listening on port {PORT}")
-    await stop_event.wait()
-    await shutdown(server, runner)
+    try:
+        await stop_event.wait()
+        await shutdown(server, runner)
+    except asyncio.CancelledError:
+        await shutdown(server, runner)
+    finally:
+        loop.close()
     print("WebSocket server shut down gracefully.")
 
 if __name__ == "__main__":
-    # Run the main coroutine
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.close()
