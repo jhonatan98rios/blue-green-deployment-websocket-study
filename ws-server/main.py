@@ -73,18 +73,27 @@ async def player_handler(websocket: websockets.WebSocketServerProtocol, path: st
         connected_clients.remove(websocket)
         
 
-async def shutdown(server, runner):  # runner is NEW
-    global is_shutting_down
+async def shutdown(server, runner):
     print("Gracefully shutting down...")
-    is_shutting_down = True
 
     server.close()
     await server.wait_closed()
 
-    await asyncio.gather(*(client.close() for client in connected_clients))
+    timeout = 3600  # 1 hour
 
+    async def wait_for_clients():
+        while connected_clients:
+            print(f"Waiting for {len(connected_clients)} clients to disconnect...")
+            await asyncio.sleep(5)
+
+    try:
+        await asyncio.wait_for(wait_for_clients(), timeout=timeout)
+    except asyncio.TimeoutError:
+        print("Forcefully shutting down after timeout.")
+
+    await asyncio.gather(*(client.close() for client in connected_clients))
     if runner:
-        await runner.cleanup()  # stop HTTP server too
+        await runner.cleanup()
     print("Shutdown complete.")
 
 
@@ -99,12 +108,13 @@ async def main() -> None:
     """
     Entry point: starts WebSocket server with two handlers.
     """
-    global is_shutting_down
     
     loop = asyncio.get_event_loop()
     stop_event = asyncio.Event()
     
     def handle_signal():
+        global is_shutting_down
+        is_shutting_down = True
         stop_event.set()
         
     # Register signal handlers

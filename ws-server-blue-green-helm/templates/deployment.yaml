@@ -29,6 +29,9 @@ spec:
           ports:
             - containerPort: {{ .Values.ws_server_blue_green.containerPort }}
           readinessProbe:
-          httpGet:
-            path: /healthz
-            port: 8000
+            httpGet:
+              path: /healthz
+              port: 8001
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 1

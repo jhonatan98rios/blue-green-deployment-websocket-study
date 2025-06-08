@@ -4,7 +4,12 @@
 
 ```bash
 docker build -t ws-server-blue-green:0.0.1 ./ws-server
-docker tag ws-server-blue-green:0.0.1 127.0.0.1:5000/ws-server-blue-green:latest
+
+docker tag ws-server-blue-green:0.0.1 ws-server-blue-green:latest
+docker tag ws-server-blue-green:0.0.1 127.0.0.1:5000/ws-server-blue-green:0.0.1
+docker tag ws-server-blue-green:latest 127.0.0.1:5000/ws-server-blue-green:latest
+
+docker push 127.0.0.1:5000/ws-server-blue-green:0.0.1
 docker push 127.0.0.1:5000/ws-server-blue-green:latest
 ```
 
