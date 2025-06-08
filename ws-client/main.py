@@ -9,7 +9,7 @@ from typing import Dict, Tuple, TypedDict
 WIDTH, HEIGHT = 800, 600
 PLAYER_SIZE = 20
 SPEED = 5
-SERVER_URL = "ws://localhost:8080"
+SERVER_URL = "ws://127.0.0.1:54128"
 
 # --- Typing ---
 class Player(TypedDict):
@@ -85,6 +85,9 @@ async def game_loop() -> None:
             except (asyncio.TimeoutError, websockets.ConnectionClosed) as e:
                 print(f"Connection closed: {e}")
                 break
+            except Exception as e:
+                print(f"Error receiving data: {e}")
+                continue
 
             screen.fill((0, 0, 0))  # Clear screen
             draw_players(screen, players)

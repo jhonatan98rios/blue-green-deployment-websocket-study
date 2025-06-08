@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app: {{ .Chart.Name }}
+    component: ws_server_blue_green
+spec:
+  type: {{ .Values.ws_server_blue_green.service.type }}
+  ports:
+    - port: {{ .Values.ws_server_blue_green.service.port }}
+      targetPort: {{ .Values.ws_server_blue_green.service.targetPort }}
+      nodePort: {{ .Values.ws_server_blue_green.service.nodePort }}
+  selector:
+    app: {{ .Chart.Name }}
+    component: ws_server_blue_green
