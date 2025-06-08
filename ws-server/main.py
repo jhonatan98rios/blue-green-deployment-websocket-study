@@ -3,6 +3,7 @@ import os
 import json
 import signal
 from typing import Dict, TypedDict
+import time
 
 import redis
 import websockets
@@ -112,30 +113,6 @@ async def shutdown(server, runner):
         await runner.cleanup()
     print("Shutdown complete.")
     
-# async def shutdown(server, runner):
-#     print("Gracefully shutting down...")
-    
-#     # First: reject new connections
-#     server.close()
-#     await server.wait_closed()
-    
-#     timeout = 3600  # 1 hour
-
-#     async def wait_for_clients():
-#         while connected_clients:
-#             print(f"Waiting for {len(connected_clients)} clients to disconnect...")
-#             await asyncio.sleep(5)
-
-#     try:
-#         await asyncio.wait_for(wait_for_clients(), timeout=timeout)
-#     except asyncio.TimeoutError:
-#         print("Forcefully shutting down after timeout.")
-
-#     # await asyncio.gather(*(client.close() for client in connected_clients))
-#     if runner:
-#         await runner.cleanup()
-#     print("Shutdown complete.")
-
 
 # NEW: health check handler
 async def healthz_handler(request):
@@ -143,13 +120,6 @@ async def healthz_handler(request):
     global is_shutting_down
     if is_shutting_down:
         return web.Response(status=503, text="Shutting down")
-    return web.Response(status=200, text="OK")
-
-
-async def drain_handler(request):
-    print("Received drain request")
-    global is_shutting_down
-    is_shutting_down = True
     return web.Response(status=200, text="OK")
 
 
@@ -165,7 +135,6 @@ async def main() -> None:
         print("Received termination signal")
         global is_shutting_down
         is_shutting_down = True
-        # stop_event.set()
         
     # Register signal handlers
     loop.add_signal_handler(signal.SIGINT, handle_signal)
@@ -182,7 +151,6 @@ async def main() -> None:
     # Start HTTP health check server (on same or separate port)
     app = web.Application()
     app.router.add_get("/healthz", healthz_handler)
-    app.router.add_get("/start-draining", drain_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host="0.0.0.0", port=PORT + 1)  # e.g. 8001
