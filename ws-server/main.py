@@ -6,6 +6,7 @@ from typing import Dict, TypedDict
 
 import redis
 import websockets
+from aiohttp import web 
 
 # Constants and configuration
 PLAYER_COLOR: str = os.getenv("PLAYER_COLOR", "green")  # "blue" or "green"
@@ -72,20 +73,34 @@ async def player_handler(websocket: websockets.WebSocketServerProtocol, path: st
         connected_clients.remove(websocket)
         
 
-async def shutdown(server):
+async def shutdown(server, runner):  # runner is NEW
+    global is_shutting_down
     print("Gracefully shutting down...")
+    is_shutting_down = True
+
     server.close()
     await server.wait_closed()
 
-    # Gracefully close all connections
     await asyncio.gather(*(client.close() for client in connected_clients))
+
+    if runner:
+        await runner.cleanup()  # stop HTTP server too
     print("Shutdown complete.")
+
+
+# NEW: health check handler
+async def healthz_handler(request):
+    if is_shutting_down:
+        return web.Response(status=503, text="Shutting down")
+    return web.Response(status=200, text="OK")
 
 
 async def main() -> None:
     """
     Entry point: starts WebSocket server with two handlers.
     """
+    global is_shutting_down
+    
     loop = asyncio.get_event_loop()
     stop_event = asyncio.Event()
     
@@ -96,16 +111,25 @@ async def main() -> None:
     loop.add_signal_handler(signal.SIGINT, handle_signal)
     loop.add_signal_handler(signal.SIGTERM, handle_signal)
     
+    # Start WebSocket server
     server = await websockets.serve(
         ws_handler=player_handler,
         host="",
         port=PORT,
         ping_interval=None  # disable built-in pings for simplicity
     )
+    
+    # Start HTTP health check server (on same or separate port)
+    app = web.Application()
+    app.router.add_get("/healthz", healthz_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=PORT + 1)  # e.g. 8001
+    await site.start()
 
     print(f"WebSocket server ({PLAYER_COLOR}) listening on port {PORT}")
     await stop_event.wait()
-    await shutdown(server)
+    await shutdown(server, runner)
     print("WebSocket server shut down gracefully.")
 
 if __name__ == "__main__":

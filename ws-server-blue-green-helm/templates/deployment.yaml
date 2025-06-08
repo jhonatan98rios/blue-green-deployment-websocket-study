@@ -7,10 +7,16 @@ metadata:
     component: ws_server_blue_green
 spec:
   replicas: {{ .Values.replicaCount }}
+  terminationGracePeriodSeconds: 60 # allow time for graceful shutdown
   selector:
     matchLabels:
       app: {{ .Chart.Name }}
       component: ws_server_blue_green
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1       # allow one extra pod during update
+      maxUnavailable: 0 # do not take down old pods until new ones are ready
   template:
     metadata:
       labels:
@@ -22,3 +28,7 @@ spec:
           image: "{{ .Values.ws_server_blue_green.image.repository }}:{{ .Values.ws_server_blue_green.image.tag }}"
           ports:
             - containerPort: {{ .Values.ws_server_blue_green.containerPort }}
+          readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
