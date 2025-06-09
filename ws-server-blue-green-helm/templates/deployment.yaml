@@ -21,7 +21,7 @@ spec:
         app: {{ .Chart.Name }}
         component: ws_server_blue_green
     spec:
-      terminationGracePeriodSeconds: 120 # allow time for graceful shutdown
+      terminationGracePeriodSeconds: 300 # allow time for graceful shutdown
       containers:
       - name: ws-server-blue-green
         image: "{{ .Values.ws_server_blue_green.image.repository }}:{{ .Values.ws_server_blue_green.image.tag }}"

@@ -94,7 +94,7 @@ async def shutdown(server, runner):
         await asyncio.wait(close_tasks, timeout=30)
     
     # Third: wait for handlers to complete
-    timeout = 300  # 5 minutes max
+    timeout = 30  # 5 minutes max
     start_time = time.time()
     
     while connected_clients:
