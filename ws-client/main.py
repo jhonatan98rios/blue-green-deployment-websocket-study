@@ -9,7 +9,7 @@ from typing import Dict, Tuple, TypedDict
 WIDTH, HEIGHT = 800, 600
 PLAYER_SIZE = 20
 SPEED = 5
-SERVER_URL = "ws://127.0.0.1:53531"
+SERVER_URL = "ws://127.0.0.1:61383"
 
 # --- Typing ---
 class Player(TypedDict):
