@@ -1,11 +1,15 @@
 # How to run
 
 ### Start minikube
+```bash
 minikube start
+```
 
 ### Enable minikube container registry as principal while using the terminal (you'll need to re-run after opening a new terminal)
+```bash
 minikube addons enable registry minikube docker-env
 minikube -p minikube docker-env --shell powershell | Invoke-Expression
+```
 
 ### Start REDIS
 ```bash
