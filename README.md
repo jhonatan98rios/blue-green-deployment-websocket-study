@@ -77,13 +77,14 @@ minikube -p minikube docker-env --shell powershell | Invoke-Expression
     kubectl logs -f $(kubectl get pods | findstr ws-server-blue-green | ForEach-Object { ($_ -split '\s+')[0] })
 ```
 
+# To clear everything
 
 ### Deleting the chart
 ```bash
     helm delete ws-server-blue-green-helm
 ```
 
-# Deleting the images (windows)
+### Deleting the images (windows)
 
 ```bash
 docker rmi $(docker images | findstr ws-server-blue-green | ForEach-Object { ($_ -split '\s+')[2] }) --force
