@@ -24,4 +24,4 @@ COPY main.py .
 EXPOSE 8000
 
 # Define default command
-ENTRYPOINT ["python3", "-u", "main.py"]
+CMD ["python3", "-u", "main.py"]

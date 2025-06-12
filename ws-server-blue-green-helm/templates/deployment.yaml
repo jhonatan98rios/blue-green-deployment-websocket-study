@@ -17,14 +17,17 @@ spec:
       maxUnavailable: 0 # do not take down old pods until new ones are ready
   template:
     metadata:
+      annotations:
+        rollme: "{{ now | unixEpoch }}"
       labels:
         app: {{ .Chart.Name }}
         component: ws_server_blue_green
     spec:
-      terminationGracePeriodSeconds: 300 # allow time for graceful shutdown
+      terminationGracePeriodSeconds: 3600 # allow time for graceful shutdown
       containers:
       - name: ws-server-blue-green
         image: "{{ .Values.ws_server_blue_green.image.repository }}:{{ .Values.ws_server_blue_green.image.tag }}"
+        imagePullPolicy: Always
         ports:
         - containerPort: {{ .Values.ws_server_blue_green.containerPort }}
         - containerPort: {{ .Values.ws_server_blue_green.healthCheckPort }}
@@ -35,3 +38,7 @@ spec:
           initialDelaySeconds: 2
           periodSeconds: 5
           failureThreshold: 1
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "wget -qO- --post-data='' http://localhost:8001/shutdown || true"]

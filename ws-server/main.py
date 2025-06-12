@@ -2,173 +2,130 @@ import asyncio
 import os
 import json
 import signal
-from typing import Dict, TypedDict
 import time
+from typing import Dict, TypedDict, Set
 
 import redis
 import websockets
-from aiohttp import web 
+from aiohttp import web
 
-# Constants and configuration
-PLAYER_COLOR: str = os.getenv("PLAYER_COLOR", "green")  # "blue" or "green"
-PORT: int = 8000
-REDIS_HOST: str = 'redis-master'
 
-# TypedDict for player data
 class PlayerData(TypedDict):
     x: float
     y: float
     color: str
 
-# Initialize Redis client (blocking) for PoC
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
 
-# Global state to track shutdown
-is_shutting_down = False
-connected_clients = set()
+class WebSocketServerApp:
+    def __init__(self):
+        self.player_color: str = os.getenv("PLAYER_COLOR", "green")
+        self.port: int = 8000
+        self.redis_client = redis.Redis(host='redis-master', port=6379, decode_responses=True)
+        self.connected_clients: Set[websockets.WebSocketServerProtocol] = set()
+        self.is_shutting_down = False
+        self.stop_event = asyncio.Event()
 
-async def player_handler(websocket: websockets.WebSocketServerProtocol, path: str) -> None:
-    """
-    Main WebSocket handler: receives movement deltas, updates position,
-    stores state in Redis, and echoes full players dict.
-    """
-    global is_shutting_down
-    
-    if is_shutting_down:
-        await websocket.close(code=1001, reason="Server is shutting down")
-        print("Connection refused: server is shutting down.")
-        return
-    
-    connected_clients.add(websocket)
-    
-    sid: str = str(id(websocket))  # Session ID key--OK for PoC
-    x, y = 100.0, 100.0            # Starting position for new players
+    async def player_handler(self, websocket: websockets.WebSocketServerProtocol, path: str):
+        if self.is_shutting_down:
+            #await websocket.close(code=1001, reason="Server is shutting down")
+            print("Connection refused: server is shutting down.")
+            return
 
-    # Store initial state in Redis
-    initial_data: PlayerData = {'x': x, 'y': y, 'color': PLAYER_COLOR}
-    redis_client.hset('players', sid, json.dumps(initial_data))
+        self.connected_clients.add(websocket)
+        print(f"[JOIN] Client connected. Total: {len(self.connected_clients)}")
 
-    try:
-        async for message in websocket:
-            # Parse movement delta
-            data: Dict[str, float] = json.loads(message)
-            dx: float = data.get('dx', 0.0)
-            dy: float = data.get('dy', 0.0)
+        sid = str(id(websocket))
+        x, y = 100.0, 100.0
+        initial_data: PlayerData = {'x': x, 'y': y, 'color': self.player_color}
+        self.redis_client.hset('players', sid, json.dumps(initial_data))
 
-            # Compute new position
-            x += dx
-            y += dy
+        try:
+            async for message in websocket:
+                data: Dict[str, float] = json.loads(message)
+                dx = data.get('dx', 0.0)
+                dy = data.get('dy', 0.0)
+                x += dx
+                y += dy
 
-            # Update Redis state
-            player_data: PlayerData = {'x': x, 'y': y, 'color': PLAYER_COLOR}
-            redis_client.hset('players', sid, json.dumps(player_data))
+                player_data: PlayerData = {'x': x, 'y': y, 'color': self.player_color}
+                self.redis_client.hset('players', sid, json.dumps(player_data))
 
-            # Fetch all players from Redis
-            all_players_raw: Dict[str, str] = redis_client.hgetall('players')
-            # Relay to client
-            await websocket.send(json.dumps(all_players_raw))
+                all_players_raw = self.redis_client.hgetall('players')
+                await websocket.send(json.dumps(all_players_raw))
+        except websockets.ConnectionClosed:
+            print(f"[LEAVE] Player {sid} disconnected.")
+        finally:
+            self.redis_client.hdel('players', sid)
+            self.connected_clients.remove(websocket)
+            print(f"[CLEANUP] Client removed. Total: {len(self.connected_clients)}")
 
-    except websockets.ConnectionClosed:
-        print(f"Player {sid} disconnected.")
-        
-    finally:
-        redis_client.hdel('players', sid)
-        connected_clients.remove(websocket)
-        
-async def shutdown(server, runner):
-    print("Gracefully shutting down...")
-    
-    # First: reject new connections
-    server.close()
-    await server.wait_closed()
-    
-    # Second: notify existing clients
-    close_tasks = []
-    for client in connected_clients.copy():  # Use copy to avoid modification during iteration
-        close_tasks.append(
-            client.close(code=1001, reason="Server maintenance in progress")
-        )
-    
-    # Wait for all close operations to complete
-    if close_tasks:
-        await asyncio.wait(close_tasks, timeout=30)
-    
-    # Third: wait for handlers to complete
-    timeout = 30  # 5 minutes max
-    start_time = time.time()
-    
-    while connected_clients:
-        remaining = len(connected_clients)
-        elapsed = time.time() - start_time
-        print(f"Waiting for {remaining} clients (elapsed: {elapsed:.1f}s)")
-        
-        if elapsed > timeout:
-            print("Timeout reached - forcing shutdown")
-            break
+    async def shutdown(self, server, runner):
+        print("Gracefully shutting down...")
+        print(f"Total players connected: {len(self.connected_clients)}")
+
+        self.is_shutting_down = True
+
+        timeout = 3600
+        start_time = time.time()
+
+        while self.connected_clients:
+            remaining = len(self.connected_clients)
+            elapsed = time.time() - start_time
+            print(f"Waiting for {remaining} clients (elapsed: {elapsed:.1f}s)")
+            if elapsed > timeout:
+                print("Timeout reached - forcing shutdown")
+                break
+            await asyncio.sleep(5)
             
-        await asyncio.sleep(5)
-    
-    # Cleanup HTTP server
-    if runner:
-        await runner.cleanup()
-    print("Shutdown complete.")
-    
+        server.close()
+        await server.wait_closed()
 
-# NEW: health check handler
-async def healthz_handler(request):
-    print("Health check received")
-    global is_shutting_down
-    if is_shutting_down:
-        return web.Response(status=503, text="Shutting down")
-    return web.Response(status=200, text="OK")
+        if runner:
+            await runner.cleanup()
+        print("Shutdown complete.")
 
+    async def healthz_handler(self, request):
+        print("Health check received")
+        if self.is_shutting_down:
+            return web.Response(status=503, text="Shutting down")
+        return web.Response(status=200, text="OK")
 
-async def main() -> None:
-    """
-    Entry point: starts WebSocket server with two handlers.
-    """
-    
-    loop = asyncio.get_event_loop()
-    stop_event = asyncio.Event()
-    
-    def handle_signal():
+    async def shutdown_handler(self, request):
+        self.is_shutting_down = True
+        return web.Response(status=200, text="Shutdown initiated")
+
+    async def handle_signal(self):
         print("Received termination signal")
-        global is_shutting_down
-        is_shutting_down = True
-        
-    # Register signal handlers
-    loop.add_signal_handler(signal.SIGINT, handle_signal)
-    loop.add_signal_handler(signal.SIGTERM, handle_signal)
-    
-    # Start WebSocket server
-    server = await websockets.serve(
-        ws_handler=player_handler,
-        host="",
-        port=PORT,
-        ping_interval=None  # disable built-in pings for simplicity
-    )
-    
-    # Start HTTP health check server (on same or separate port)
-    app = web.Application()
-    app.router.add_get("/healthz", healthz_handler)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, host="0.0.0.0", port=PORT + 1)  # e.g. 8001
-    await site.start()
+        self.is_shutting_down = True
+        await asyncio.sleep(30)  # Give time for clients to disconnect
+        self.stop_event.set()
 
-    print(f"WebSocket server ({PLAYER_COLOR}) listening on port {PORT}")
-    try:
-        await stop_event.wait()
-        await shutdown(server, runner)
-    except asyncio.CancelledError:
-        await shutdown(server, runner)
-    finally:
-        loop.close()
-    print("WebSocket server shut down gracefully.")
+    async def main(self):
+        loop = asyncio.get_event_loop()
+        loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(self.handle_signal()))
+        loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(self.handle_signal()))
+
+        server = await websockets.serve(
+            lambda ws, path: self.player_handler(ws, path),
+            host="",
+            port=self.port,
+            ping_interval=None
+        )
+
+        app = web.Application()
+        app.router.add_get("/healthz", self.healthz_handler)
+        app.router.add_post("/shutdown", self.shutdown_handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, host="0.0.0.0", port=self.port + 1)
+        await site.start()
+
+        print(f"WebSocket server ({self.player_color}) listening on port {self.port}")
+        await self.stop_event.wait()
+        await self.shutdown(server, runner)
+
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(main())
-    finally:
-        loop.close()
+    app = WebSocketServerApp()
+    asyncio.run(app.main())
+
